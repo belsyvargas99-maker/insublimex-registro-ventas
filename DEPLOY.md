@@ -29,22 +29,17 @@ Con eso Google está listo. Sin el paso 11 la app arranca pero dirá "La cuenta 
 
 > Estado al 13/09/2026: pasos 1-11 **ya hechos** con `Insublimexoperaciones@gmail.com`. Hoja `1-GAxneIndqUcVvCNFYgnoV2AXnF2Pkh6yIQUnF9FnGU`, cuenta de servicio `registro-ventas@insublimex-registro.iam.gserviceaccount.com`. Probado: escribe filas, cambia estados, guarda comprobantes.
 
-## Parte 2 — El servidor (VPS de n8n)
+## Parte 2 — El servidor (VPS de Hostinger, el mismo de n8n)
 
-13. Sube la carpeta del proyecto al VPS (por ejemplo a `/opt/insublimex-ventas`) y dentro coloca:
-    - `service-account.json` (paso 10)
-    - `.env` copiado de `.env.example` con:
-      ```
-      ADMIN_PIN=una-clave-larga-que-sabrán-las-asesoras
-      SHEETS_SPREADSHEET_ID=1-GAxneIndqUcVvCNFYgnoV2AXnF2Pkh6yIQUnF9FnGU
-      RECEIPT_STORAGE=local
-      ASESORAS=Nombre Uno,Nombre Dos,Nombre Tres
-      PUBLIC_URL=https://ventas.insublimexvnzla.com
-      ```
-14. Crea el subdominio `ventas.insublimexvnzla.com` apuntando a la IP del VPS (mismo sitio donde está `n8n.insublimexvnzla.com`).
-15. Levanta la app: `docker compose up -d --build`. Queda escuchando en `127.0.0.1:3010`.
-16. En el proxy que ya usa n8n (Traefik / Caddy / Nginx Proxy Manager) agrega `ventas.insublimexvnzla.com → localhost:3010` con certificado HTTPS.
-17. Comprueba: `https://ventas.insublimexvnzla.com/api/health` debe responder `{"status":"ok","google":true,...}`.
+> Estado al 13/09/2026: **desplegado y funcionando** en `https://ventas.insublimexvnzla.com`.
+
+Cómo está montado (para quien lo mantenga):
+- El código vive en GitHub: `github.com/belsyvargas99-maker/insublimex-registro-ventas`. Cada `git push` a `main` construye la imagen `ghcr.io/belsyvargas99-maker/insublimex-registro-ventas:latest` automáticamente (GitHub Actions, ~3 min).
+- En el VPS corre como proyecto **`insublimex-ventas`** del Docker Manager de Hostinger (hPanel → VPS → Docker Manager), usando `hostinger-compose.yml`. Comparte la red y el Traefik del proyecto `n8n`, que le da el certificado HTTPS.
+- Las variables (clave del panel, hoja, asesoras y la llave de Google en base64) están en el **Environment** de ese proyecto en Docker Manager. Ahí se cambian; luego botón **Redeploy**.
+- El DNS `ventas.insublimexvnzla.com → 2.24.202.165` está en Vercel (donde vive el dominio).
+
+Para actualizar la app: subir el cambio a GitHub, esperar la construcción, y en Docker Manager pulsar **Redeploy** (o repetir la llamada `POST /docker` de la API con el mismo compose).
 
 ## Cómo se usa
 - **Asesoras:** `https://ventas.insublimexvnzla.com` → clave del equipo → panel.
@@ -54,5 +49,5 @@ Con eso Google está listo. Sin el paso 11 la app arranca pero dirá "La cuenta 
 ## Si algo falla
 - **"Google sin conectar" en el panel:** falta `service-account.json`, `SHEETS_SPREADSHEET_ID`, o no se compartió la hoja (paso 11). Mientras tanto las ventas quedan guardadas en `data/pending.json` y se pasan solas a la hoja cuando se arregle.
 - **"N en cola" en el panel:** Google no respondió en ese momento; el servidor reintenta cada minuto. No hay que hacer nada.
-- **Cambiar la clave o las asesoras:** editar `.env` y `docker compose up -d`.
-- **Las fotos de comprobantes** viven en el volumen `ventas-uploads` del VPS. Conviene incluirlo en el respaldo del servidor junto con el de n8n.
+- **Las fotos de comprobantes** viven en el volumen `ventas_uploads` del VPS (snapshots de Hostinger las incluyen).
+- **Cambiar la clave o las asesoras:** Docker Manager → proyecto `insublimex-ventas` → Environment → editar `ADMIN_PIN` / `ASESORAS` → Redeploy.
