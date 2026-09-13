@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+@import "tailwindcss";
+
+/*
+  Tema INSUBLIMEX — paleta del manual de marca (misma que insublimexvnzla.com).
+  La UI se escribió sobre la escala `emerald`/`teal` de Tailwind; en vez de
+  reescribir cientos de clases, esas escalas se remapean a la marca:
+    emerald -> lila (#8B5CF6 acento principal, #6D28D9 profundo)
+    teal    -> magenta (#D6249F acento secundario)
+    slate   -> tinta (#1D1A2B texto) y lila pastel (#FAF8FF fondo)
+*/
+@theme {
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-emerald-50: #F5F3FF;
+  --color-emerald-100: #EDE9FE;
+  --color-emerald-200: #DDD6FE;
+  --color-emerald-300: #C4B5FD;
+  --color-emerald-400: #A78BFA;
+  --color-emerald-500: #8B5CF6;
+  --color-emerald-600: #7C3AED;
+  --color-emerald-700: #6D28D9;
+  --color-emerald-800: #5B21B6;
+  --color-emerald-900: #4C1D95;
+  --color-emerald-950: #2E1065;
+
+  --color-teal-50: #FDF2FA;
+  --color-teal-100: #FCE7F5;
+  --color-teal-200: #FBCFEB;
+  --color-teal-300: #F7A8DA;
+  --color-teal-400: #EF6BC0;
+  --color-teal-500: #E23FAC;
+  --color-teal-600: #D6249F;
+  --color-teal-700: #B31A83;
+  --color-teal-800: #91176A;
+  --color-teal-900: #781858;
+  --color-teal-950: #4A0736;
+
+  --color-slate-50: #FAF8FF;
+  --color-slate-100: #F3F0FA;
+  --color-slate-200: #E9E0FF;
+  --color-slate-300: #D3CBE6;
+  --color-slate-400: #9C95B0;
+  --color-slate-500: #5C5670;
+  --color-slate-600: #4A445C;
+  --color-slate-700: #38334A;
+  --color-slate-800: #27233A;
+  --color-slate-900: #1D1A2B;
+  --color-slate-950: #15131F;
+
+  --color-amarillo: #FACC15;
+  --color-amarillo-soft: #FFC75F;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+}

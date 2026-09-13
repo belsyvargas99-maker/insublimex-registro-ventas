@@ -1,0 +1,42 @@
+# Compose para el Docker Manager de Hostinger. Se cuelga del Traefik del proyecto
+# "n8n" (misma red n8n_default, mismo resolver de certificados).
+services:
+  ventas:
+    image: ghcr.io/belsyvargas99-maker/insublimex-registro-ventas:latest
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ADMIN_PIN=${ADMIN_PIN}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SHEETS_SPREADSHEET_ID=${SHEETS_SPREADSHEET_ID}
+      - SHEETS_TAB_NAME=Ventas
+      - RECEIPT_STORAGE=local
+      - ASESORAS=${ASESORAS}
+      - PUBLIC_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}
+      - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON}
+    volumes:
+      - ventas_data:/app/data
+      - ventas_uploads:/app/uploads
+    networks:
+      - n8n_default
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.ventas.rule=Host(`${SUBDOMAIN}.${DOMAIN_NAME}`)
+      - traefik.http.routers.ventas.entrypoints=web,websecure
+      - traefik.http.routers.ventas.tls=true
+      - traefik.http.routers.ventas.tls.certresolver=mytlschallenge
+      - traefik.http.services.ventas.loadbalancer.server.port=3000
+      - traefik.http.middlewares.ventas.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.ventas.headers.browserXSSFilter=true
+      - traefik.http.middlewares.ventas.headers.STSSeconds=31536000
+      - traefik.http.routers.ventas.middlewares=ventas@docker
+
+volumes:
+  ventas_data:
+  ventas_uploads:
+
+networks:
+  n8n_default:
+    external: true

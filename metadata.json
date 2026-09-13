@@ -1,0 +1,6 @@
+{
+  "name": "INSUBLIMEX - Registro de Ventas",
+  "description": "Registro de ventas cerradas por WhatsApp de INSUBLIMEX (sublimación, Venezuela): portal de confirmación de pago para el cliente, validación contra catálogo y sincronización con Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
