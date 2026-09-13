@@ -6,6 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
-uploads/
-data/
+/uploads/
+/data/
 service-account.json
