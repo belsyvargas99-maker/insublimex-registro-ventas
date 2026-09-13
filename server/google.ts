@@ -129,7 +129,9 @@ export async function readRows(cfg: GoogleConfig, range = 'A1:Z5000'): Promise<s
 export async function appendRow(cfg: GoogleConfig, values: (string | number)[]): Promise<void> {
   const r = encodeURIComponent(`${cfg.sheetName}!A1`);
   await googleFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    // RAW: los textos se guardan tal cual (un "+58..." con USER_ENTERED se convertía en número
+    // porque Sheets lo lee como fórmula); los números siguen siendo números.
+    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,7 +145,7 @@ export async function updateCell(cfg: GoogleConfig, rowNumber: number, colIndex:
   const colLetter = String.fromCharCode(65 + colIndex);
   const r = encodeURIComponent(`${cfg.sheetName}!${colLetter}${rowNumber}`);
   await googleFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}?valueInputOption=RAW`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
