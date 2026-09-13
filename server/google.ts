@@ -120,7 +120,7 @@ async function googleFetch(url: string, init: RequestInit = {}): Promise<any> {
 
 // ───────────────────────── Sheets ─────────────────────────
 
-export async function readRows(cfg: GoogleConfig, range = 'A1:Z5000'): Promise<string[][]> {
+export async function readRows(cfg: GoogleConfig, range = 'A1:Z50000'): Promise<string[][]> {
   const r = encodeURIComponent(`${cfg.sheetName}!${range}`);
   const data = await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}`);
   return data.values || [];
@@ -175,35 +175,108 @@ export async function ensureSheetHeaders(cfg: GoogleConfig, headers: string[]): 
   const existing = await readRows(cfg, 'A1:Z1');
   const current = existing[0] || [];
   const same = headers.length === current.length && headers.every((h, i) => h === current[i]);
-  if (same) return;
+  if (!same) {
+    const r = encodeURIComponent(`${cfg.sheetName}!A1`);
+    await googleFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}?valueInputOption=RAW`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [headers] }) }
+    );
+  }
+  await formatSheet(cfg, sheetId, headers.length);
+}
 
-  const r = encodeURIComponent(`${cfg.sheetName}!A1`);
-  await googleFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}/values/${r}?valueInputOption=RAW`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [headers] }) }
+/**
+ * Anchos de columna (píxeles) para que cada dato se lea sin abrir la celda.
+ * Se aplica en cada arranque: es idempotente y barato.
+ */
+const COLUMN_WIDTHS: Record<string, number> = {
+  'ID Registro': 150,
+  'Fecha y Hora de Registro': 170,
+  'Fecha de Compra': 120,
+  'Cliente': 220,
+  'Cédula': 110,
+  'Email': 240,
+  'Teléfono': 140,
+  'Estado': 130,
+  'Ciudad': 160,
+  'Dirección': 320,
+  'Asesora': 150,
+  'Producto': 300,
+  'Categoría': 150,
+  'Cantidad': 80,
+  'Precio Unitario ($)': 120,
+  'Monto Total ($)': 120,
+  'Método de Pago': 130,
+  'Tipo de Pago': 120,
+  'Referencia de Pago': 180,
+  'Comprobante (imagen)': 260,
+  'Estado del Registro': 140,
+  'Origen': 120,
+  'Score': 70,
+  'Nivel Riesgo': 100,
+  'Notas / Validación': 400,
+};
+const WRAP_COLUMNS = ['Dirección', 'Producto', 'Notas / Validación'];
+
+export async function formatSheet(cfg: GoogleConfig, sheetId: number, columnCount: number): Promise<void> {
+  const header = (await readRows(cfg, 'A1:Z1'))[0] || [];
+  const requests: any[] = [
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 0.427, green: 0.157, blue: 0.851 },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
+            horizontalAlignment: 'CENTER',
+            verticalAlignment: 'MIDDLE',
+            wrapStrategy: 'WRAP',
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)',
+      },
+    },
+    { updateDimensionProperties: { range: { sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 42 }, fields: 'pixelSize' } },
+    { updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: 1 } }, fields: 'gridProperties(frozenRowCount,frozenColumnCount)' } },
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: columnCount },
+        cell: { userEnteredFormat: { verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP', padding: { top: 4, bottom: 4, left: 6, right: 6 } } },
+        fields: 'userEnteredFormat(verticalAlignment,wrapStrategy,padding)',
+      },
+    },
+  ];
+  header.forEach((name, i) => {
+    const width = COLUMN_WIDTHS[name] ?? 140;
+    requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: i, endIndex: i + 1 }, properties: { pixelSize: width }, fields: 'pixelSize' } });
+    if (WRAP_COLUMNS.includes(name)) {
+      requests.push({
+        repeatCell: {
+          range: { sheetId, startRowIndex: 1, startColumnIndex: i, endColumnIndex: i + 1 },
+          cell: { userEnteredFormat: { wrapStrategy: 'WRAP' } },
+          fields: 'userEnteredFormat.wrapStrategy',
+        },
+      });
+    }
+  });
+  // Filas alternas sombreadas para leer mejor (solo si aún no existe la regla: se corre en cada arranque)
+  const fmt = await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}?fields=sheets(properties.sheetId,conditionalFormats)`
   );
+  const hasBanding = (fmt.sheets || []).some((sh: any) => sh.properties.sheetId === sheetId && (sh.conditionalFormats || []).length > 0);
+  if (!hasBanding) requests.push({
+    addConditionalFormatRule: {
+      rule: {
+        ranges: [{ sheetId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: columnCount }],
+        booleanRule: { condition: { type: 'CUSTOM_FORMULA', values: [{ userEnteredValue: '=ISEVEN(ROW())' }] }, format: { backgroundColor: { red: 0.98, green: 0.973, blue: 1 } } },
+      },
+      index: 0,
+    },
+  });
   await googleFetch(`https://sheets.googleapis.com/v4/spreadsheets/${cfg.spreadsheetId}:batchUpdate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      requests: [
-        {
-          repeatCell: {
-            range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
-            cell: {
-              userEnteredFormat: {
-                backgroundColor: { red: 0.427, green: 0.157, blue: 0.851 },
-                textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
-                horizontalAlignment: 'CENTER',
-              },
-            },
-            fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
-          },
-        },
-        { updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
-        { autoResizeDimensions: { dimensions: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: headers.length } } },
-      ],
-    }),
+    body: JSON.stringify({ requests }),
   });
 }
 
