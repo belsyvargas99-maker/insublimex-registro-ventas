@@ -95,8 +95,20 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     "price": 3250
   },
   {
+    "id": "plotter-epson-f570",
+    "name": "Plotter Epson SureColor F570",
+    "category": "plotters",
+    "price": 2600
+  },
+  {
     "id": "plotter-epson-t3170-sure-color",
     "name": "Plotter Epson T3170 SureColor",
+    "category": "plotters",
+    "price": 1700
+  },
+  {
+    "id": "plotter-epson-t3170-papeleria",
+    "name": "Plotter Epson T3170 Papelería",
     "category": "plotters",
     "price": 1700
   },
@@ -135,12 +147,6 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     "name": "Plotter de Corte Proccut",
     "category": "plotters",
     "price": 660
-  },
-  {
-    "id": "plotter-epson-t3170-papeleria",
-    "name": "Plotter Epson T3170 Papelería",
-    "category": "plotters",
-    "price": 1700
   },
   {
     "id": "prensa-termica-jintex-100x80",
