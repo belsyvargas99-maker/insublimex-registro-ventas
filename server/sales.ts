@@ -5,8 +5,9 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { CustomerSaleRecord } from '../src/types';
-import { evaluateSaleRecord } from '../src/services/smartEngine';
+import { CustomerSaleRecord, OrderItem } from '../src/types';
+import { evaluateSaleRecord, autoCategorize, findCatalogProduct } from '../src/services/smartEngine';
+import { CATALOG_CATEGORIES } from '../src/data/catalogo';
 import { SHEET_COLUMNS, COL, recordToRowValues, rowToRecord } from '../src/shared/sheetColumns';
 import { appendRow, readRows, updateCell, uploadToDrive, ensureSheetHeaders, getGoogleConfig, isGoogleConfigured } from './google';
 
@@ -195,9 +196,12 @@ export interface SaleInput {
   estado: unknown;
   ciudad: unknown;
   direccion: unknown;
-  productName: unknown;
+  /** Líneas del pedido: [{ name, quantity, unitPrice|null }]. */
+  items?: unknown;
+  /** Compatibilidad con clientes viejos: un solo producto. */
+  productName?: unknown;
   category?: unknown;
-  quantity: unknown;
+  quantity?: unknown;
   unitPrice?: unknown;
   totalAmount: unknown;
   paymentMethod: unknown;
@@ -205,6 +209,40 @@ export interface SaleInput {
   paymentReference: unknown;
   notes?: unknown;
   receiptImage?: unknown;
+}
+
+const CATEGORY_LABEL = Object.fromEntries(CATALOG_CATEGORIES.map((c) => [c.id, c.label]));
+
+/** Convierte lo que mande el formulario en líneas válidas del pedido. */
+function normalizeItems(input: SaleInput): OrderItem[] {
+  const raw = Array.isArray(input.items) ? input.items : [];
+  const out: OrderItem[] = [];
+  for (const r of raw.slice(0, 50)) {
+    if (!r || typeof r !== 'object') continue;
+    const name = String((r as any).name || '').trim().slice(0, 120);
+    if (!name) continue;
+    const quantity = Math.max(1, Math.min(999, Math.floor(Number((r as any).quantity) || 1)));
+    const match = findCatalogProduct(name);
+    // El precio manda el catálogo del servidor; el del cliente solo se acepta si el producto no está en catálogo.
+    let unitPrice: number | null = match ? match.price : null;
+    if (!match) {
+      const p = Number((r as any).unitPrice);
+      unitPrice = Number.isFinite(p) && p > 0 ? Number(p.toFixed(2)) : null;
+    }
+    const category = match ? CATEGORY_LABEL[match.category] : autoCategorize(name);
+    const existing = out.find((o) => o.name === name);
+    if (existing) existing.quantity += quantity;
+    else out.push({ id: match?.id ?? `otro-${out.length + 1}`, name, quantity, unitPrice, category });
+  }
+  // Formato viejo: productName + quantity + unitPrice
+  if (!out.length && input.productName) {
+    const name = String(input.productName).trim().slice(0, 120);
+    const quantity = Math.max(1, Math.floor(Number(input.quantity) || 1));
+    const match = findCatalogProduct(name);
+    const p = Number(input.unitPrice);
+    out.push({ id: match?.id ?? 'otro-1', name, quantity, unitPrice: match ? match.price : Number.isFinite(p) && p > 0 ? p : null, category: match ? CATEGORY_LABEL[match.category] : autoCategorize(name) });
+  }
+  return out;
 }
 
 export interface SaleResult {
@@ -221,10 +259,15 @@ export async function registerSale(input: SaleInput, source: 'portal-cliente' | 
   const customerName = String(input.customerName || '').trim();
   const customerEmail = String(input.customerEmail || '').trim().toLowerCase();
   const customerPhone = String(input.customerPhone || '').trim();
-  const productName = String(input.productName || '').trim();
-  if (!customerName || !customerEmail || !productName) {
-    throw new ValidationError('Nombre, correo electrónico y producto son obligatorios.');
+  if (!customerName || !customerEmail) {
+    throw new ValidationError('Nombre y correo electrónico son obligatorios.');
   }
+
+  // Pedido: lista de productos. Si llega el formato viejo (un producto), se convierte.
+  const items = normalizeItems(input);
+  if (!items.length) throw new ValidationError('Agrega al menos un producto al pedido.');
+  const productName = items.map((it) => `${it.name} ×${it.quantity}`).join(' | ');
+  const category = Array.from(new Set(items.map((it) => it.category).filter(Boolean))).join(', ');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
     throw new ValidationError('Por favor ingresa un correo electrónico válido.');
   }
@@ -238,11 +281,11 @@ export async function registerSale(input: SaleInput, source: 'portal-cliente' | 
   const direccion = String(input.direccion || '').trim().slice(0, 300);
   if (!estado || !ciudad || !direccion) throw new ValidationError('Indica estado, ciudad y dirección de entrega.');
 
-  const quantity = Math.max(1, Math.floor(Number(input.quantity) || 1));
+  const quantity = items.reduce((acc, it) => acc + it.quantity, 0);
+  // "unitPrice" en la hoja = total del pedido según catálogo (columna "Total Catálogo ($)")
+  const unitPrice = Number(items.reduce((acc, it) => acc + (it.unitPrice ?? 0) * it.quantity, 0).toFixed(2));
   let totalAmount = Math.max(0, Number(input.totalAmount) || 0);
-  let unitPrice = Number(input.unitPrice) || 0;
-  if (unitPrice > 0 && totalAmount <= 0) totalAmount = Number((unitPrice * quantity).toFixed(2));
-  if (unitPrice <= 0) unitPrice = Number((totalAmount / quantity).toFixed(2));
+  if (totalAmount <= 0 && unitPrice > 0) totalAmount = unitPrice;
   if (totalAmount <= 0) throw new ValidationError('Indica el monto pagado en USD.');
 
   const paymentMethod = (VALID_METHODS as readonly string[]).includes(String(input.paymentMethod))
@@ -268,10 +311,11 @@ export async function registerSale(input: SaleInput, source: 'portal-cliente' | 
     customerEmail,
     customerPhone,
     productName,
-    category: String(input.category || ''),
+    category,
     quantity,
     unitPrice,
     totalAmount,
+    items,
     paymentMethod,
     paymentType,
     paymentReference,
@@ -293,17 +337,23 @@ export async function registerSale(input: SaleInput, source: 'portal-cliente' | 
     direccion,
     asesora,
     productName,
-    category: draft.category || evalResult.suggestedCategory,
+    category: category || evalResult.suggestedCategory,
     quantity,
     unitPrice,
     totalAmount: evalResult.normalizedData.totalAmount,
+    items,
     paymentMethod,
     paymentType,
     paymentReference,
     receiptImageUrl: image ? `${PUBLIC_URL}${image.publicUrl}` : '',
     status: source === 'panel-asesora' ? 'Verificado' : 'Pendiente',
     source,
-    notes: notes || (source === 'portal-cliente' ? 'Registrado por el cliente desde el portal' : `Registrado por ${asesora} desde el panel`),
+    notes: [
+      paymentType === 'Abono inicial' && unitPrice > totalAmount ? `Saldo pendiente: USD ${(unitPrice - totalAmount).toFixed(2)}` : '',
+      notes.replace(/Saldo pendiente:[^|]*\|?\s*/i, '').trim() || (source === 'portal-cliente' ? 'Registrado por el cliente desde el portal' : `Registrado por ${asesora} desde el panel`),
+    ]
+      .filter(Boolean)
+      .join(' | '),
     smartValidation: {
       score: evalResult.score,
       riskLevel: evalResult.riskLevel,

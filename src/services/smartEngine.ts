@@ -114,8 +114,8 @@ export function evaluateSaleRecord(
   const normalizedName = capitalizeName(newRecord.customerName);
   const normalizedEmail = normalizeEmail(newRecord.customerEmail);
   const normalizedPhone = normalizePhone(newRecord.customerPhone);
-  const calculatedTotal = Number((newRecord.quantity * newRecord.unitPrice).toFixed(2));
-  const catalogMatch = findCatalogProduct(newRecord.productName);
+  const firstItem = newRecord.items?.[0];
+  const catalogMatch = findCatalogProduct(firstItem?.name ?? newRecord.productName);
 
   // 1. Campos básicos
   if (normalizedName.length < 3) {
@@ -149,36 +149,34 @@ export function evaluateSaleRecord(
     score -= 30;
   }
 
-  if (newRecord.unitPrice <= 0) {
-    anomalies.push('El monto debe ser mayor a cero.');
+  if (newRecord.totalAmount <= 0) {
+    anomalies.push('El monto pagado debe ser mayor a cero.');
     score -= 25;
   }
 
-  if (Math.abs(newRecord.totalAmount - calculatedTotal) > 0.05) {
-    anomalies.push(
-      `Inconsistencia: ${newRecord.quantity} × $${newRecord.unitPrice} = $${calculatedTotal}, pero se ingresó $${newRecord.totalAmount}.`
-    );
-    score -= 20;
+  // 3. Contraste del monto pagado contra el total de catálogo del pedido
+  const items = newRecord.items ?? [];
+  const unpriced = items.filter((it) => it.unitPrice == null);
+  const catalogTotal = newRecord.unitPrice; // total del pedido según catálogo
+  const isDeposit = newRecord.paymentType === 'Abono inicial';
+  if (unpriced.length) {
+    anomalies.push(`Pedido con ${unpriced.length} producto(s) sin precio de catálogo (${unpriced.map((u) => u.name).join(', ')}): verificar cotización.`);
+    score -= 5;
   }
-
-  // 3. Contraste contra el catálogo real
-  if (catalogMatch && catalogMatch.price != null && newRecord.unitPrice > 0) {
-    const expected = catalogMatch.price;
-    const diffPct = ((newRecord.unitPrice - expected) / expected) * 100;
-    const isDeposit = newRecord.paymentType === 'Abono inicial';
+  if (catalogTotal > 0 && !unpriced.length && newRecord.totalAmount > 0) {
+    const diffPct = ((newRecord.totalAmount - catalogTotal) / catalogTotal) * 100;
     if (diffPct > 5) {
-      anomalies.push(
-        `Precio unitario $${newRecord.unitPrice} supera el de catálogo ($${expected}) en ${diffPct.toFixed(0)}%. Verificar.`
-      );
+      anomalies.push(`Monto pagado $${newRecord.totalAmount} supera el total de catálogo ($${catalogTotal}) en ${diffPct.toFixed(0)}%. Verificar.`);
       score -= 15;
     } else if (diffPct < -5 && !isDeposit) {
       anomalies.push(
-        `Precio unitario $${newRecord.unitPrice} está ${Math.abs(diffPct).toFixed(0)}% por debajo del catálogo ($${expected}). Si es una seña, márcala como "Abono inicial".`
+        `Monto pagado $${newRecord.totalAmount} está ${Math.abs(diffPct).toFixed(0)}% por debajo del catálogo ($${catalogTotal}). Si es una seña, márcala como "Abono inicial".`
       );
       score -= 10;
     }
-  } else if (!catalogMatch && newRecord.productName.trim()) {
-    anomalies.push('Producto no está en el catálogo: se registra tal cual, revisar nombre y precio.');
+  }
+  if (isDeposit && catalogTotal > 0 && newRecord.totalAmount >= catalogTotal) {
+    anomalies.push('Marcado como abono inicial pero el monto cubre el total del pedido.');
     score -= 5;
   }
 
@@ -211,7 +209,8 @@ export function evaluateSaleRecord(
   }
 
   // 5. Categoría y nivel de riesgo
-  const suggestedCategory = autoCategorize(newRecord.productName);
+  const cats = Array.from(new Set((newRecord.items ?? []).map((it) => it.category || autoCategorize(it.name)).filter(Boolean)));
+  const suggestedCategory = cats.length ? cats.join(', ') : autoCategorize(newRecord.productName);
 
   score = Math.max(10, Math.min(100, score));
   let riskLevel: 'bajo' | 'medio' | 'alto' = 'bajo';
@@ -232,7 +231,7 @@ export function evaluateSaleRecord(
       customerName: normalizedName,
       customerEmail: normalizedEmail,
       customerPhone: normalizedPhone,
-      totalAmount: calculatedTotal > 0 ? calculatedTotal : newRecord.totalAmount,
+      totalAmount: Number(newRecord.totalAmount.toFixed(2)),
     },
   };
 }

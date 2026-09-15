@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sparkles, CheckCircle2, AlertTriangle, ShieldCheck, ArrowRight, RefreshCw, Lock, ImagePlus, X } from 'lucide-react';
 import { CustomerSaleRecord } from '../types';
-import { evaluateSaleRecord, autoCategorize, findCatalogProduct, CATEGORY_LABELS, DEFAULT_CATEGORY } from '../services/smartEngine';
+import { evaluateSaleRecord } from '../services/smartEngine';
 import { CATALOG_CATEGORIES, CATALOG_PRODUCTS } from '../data/catalogo';
+import { OrderItemsPicker, orderTotal, orderHasUnpriced, orderSummary } from './OrderItemsPicker';
+import { OrderItem } from '../types';
 import { PAYMENT_METHODS, PAYMENT_TYPES, formatUSD, normalizeCedula } from '../config/brand';
 import { VENEZUELA_STATES, OTHER_CITY, findState } from '../data/venezuela';
 
@@ -56,27 +58,34 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
   const purchaseDate = useMemo(() => todayInVenezuela(), []);
   const selectedState = useMemo(() => findState(estado), [estado]);
   const ciudadFinal = ciudad === OTHER_CITY ? otraCiudad.trim() : ciudad;
-  const [productName, setProductName] = useState('');
-  const [category, setCategory] = useState(DEFAULT_CATEGORY);
-  const [quantity, setQuantity] = useState<number>(1);
-  const [unitPrice, setUnitPrice] = useState<number>(0);
+  const [items, setItems] = useState<OrderItem[]>([]);
+  const [amountPaid, setAmountPaid] = useState<string>('');
+  const [amountTouched, setAmountTouched] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<CustomerSaleRecord['paymentMethod']>('Transferencia');
   const [paymentType, setPaymentType] = useState<NonNullable<CustomerSaleRecord['paymentType']>>('Pago completo');
   const [paymentReference, setPaymentReference] = useState('');
   const [notes, setNotes] = useState('');
   const [autoFixEnabled, setAutoFixEnabled] = useState(true);
 
-  // Auto-category suggestion on product change
-  useEffect(() => {
-    if (productName.trim()) {
-      setCategory(autoCategorize(productName));
-      // Si el nombre coincide con el catálogo, precargar el precio real
-      const match = findCatalogProduct(productName);
-      if (match?.price != null) setUnitPrice(match.price);
-    }
-  }, [productName]);
+  const productName = orderSummary(items);
+  const quantity = items.reduce((acc, it) => acc + it.quantity, 0);
+  const catalogTotal = orderTotal(items);
+  const hasUnpriced = orderHasUnpriced(items);
+  const totalAmount = Number((parseFloat(amountPaid) || 0).toFixed(2));
+  const category = Array.from(new Set(items.map((it) => it.category).filter(Boolean))).join(', ');
 
-  const totalAmount = Number((quantity * unitPrice).toFixed(2));
+  const handleItemsChange = (next: OrderItem[]) => {
+    setItems(next);
+    if (paymentType === 'Pago completo' && !amountTouched) {
+      const t = orderTotal(next);
+      setAmountPaid(t > 0 ? t.toFixed(2) : '');
+    }
+  };
+
+  useEffect(() => {
+    if (paymentType === 'Pago completo' && !amountTouched) setAmountPaid(catalogTotal > 0 ? catalogTotal.toFixed(2) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentType]);
 
   // Live Smart Engine Evaluation
   const previewValidation = evaluateSaleRecord(
@@ -87,8 +96,9 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
       productName,
       category,
       quantity,
-      unitPrice,
+      unitPrice: catalogTotal,
       totalAmount,
+      items,
       paymentMethod,
       paymentType,
       paymentReference,
@@ -100,7 +110,7 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName || !customerEmail || !productName) return;
+    if (!customerName || !customerEmail || !items.length) return;
     setReceiptError(null);
 
     const extraFields = {
@@ -117,11 +127,12 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
           customerName: previewValidation.normalizedData.customerName,
           customerEmail: previewValidation.normalizedData.customerEmail,
           customerPhone: previewValidation.normalizedData.customerPhone,
-          productName: productName.trim(),
+          productName,
           category,
           quantity,
-          unitPrice,
+          unitPrice: catalogTotal,
           totalAmount: previewValidation.normalizedData.totalAmount,
+          items,
           paymentMethod,
           paymentType,
           paymentReference: paymentReference.trim(),
@@ -142,8 +153,9 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
           productName,
           category,
           quantity,
-          unitPrice,
+          unitPrice: catalogTotal,
           totalAmount,
+          items,
           paymentMethod,
           paymentType,
           paymentReference: paymentReference.trim(),
@@ -176,9 +188,9 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
     setDireccion('');
     setReceiptFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    setProductName('');
-    setQuantity(1);
-    setUnitPrice(0);
+    setItems([]);
+    setAmountPaid('');
+    setAmountTouched(false);
     setPaymentType('Pago completo');
     setPaymentReference('');
     setNotes('');
@@ -200,9 +212,8 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
     setCustomerName(chosenName);
     setCustomerEmail(`${emailPrefix}@gmail.com`);
     setCustomerPhone(`0${operadora}-${Math.floor(1000000 + Math.random() * 9000000)}`);
-    setProductName(chosenProd.name);
-    setUnitPrice(chosenProd.price as number);
-    setQuantity(1);
+    const cat = CATALOG_CATEGORIES.find((c) => c.id === chosenProd.category)?.label ?? chosenProd.category;
+    handleItemsChange([{ id: chosenProd.id, name: chosenProd.name, quantity: 1, unitPrice: chosenProd.price, category: cat }]);
     setPaymentMethod(methods[Math.floor(Math.random() * methods.length)]);
     setPaymentReference(`${Math.floor(10000000 + Math.random() * 90000000)}`);
     setCedula(`V-${Math.floor(8000000 + Math.random() * 22000000)}`);
@@ -429,52 +440,9 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-3">
             Detalle del Producto Adquirido
           </span>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-2">
-              <label htmlFor="input-product-name" className="block text-xs font-medium text-slate-700 mb-1">
-                Producto o Servicio *
-              </label>
-              <input
-                id="input-product-name"
-                type="text"
-                required
-                list="catalogo-insublimex"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="Escribe para buscar en el catálogo (o un producto fuera de lista)"
-                className="w-full px-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-slate-800 transition"
-              />
-              <datalist id="catalogo-insublimex">
-                {CATALOG_CATEGORIES.map((cat) =>
-                  CATALOG_PRODUCTS.filter((p) => p.category === cat.id).map((p) => (
-                    <option key={p.id} value={p.name}>
-                      {cat.label}
-                      {p.price != null ? ` · ${formatUSD(p.price)}` : ''}
-                    </option>
-                  ))
-                )}
-              </datalist>
-            </div>
+          <OrderItemsPicker items={items} onChange={handleItemsChange} inputCls={INPUT_CLS} allowCustomPrice compact />
 
-            <div>
-              <label htmlFor="select-category" className="block text-xs font-medium text-slate-700 mb-1">
-                Categoría (Auto-asignada)
-              </label>
-              <select
-                id="select-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-slate-800 transition"
-              >
-                {CATEGORY_LABELS.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
-                ))}
-                <option value={DEFAULT_CATEGORY}>{DEFAULT_CATEGORY}</option>
-              </select>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             <div>
               <label htmlFor="select-payment-method" className="block text-xs font-medium text-slate-700 mb-1">
                 Método de Pago
@@ -496,44 +464,32 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             <div>
-              <label htmlFor="input-quantity" className="block text-xs font-medium text-slate-700 mb-1">
-                Cantidad
-              </label>
-              <input
-                id="input-quantity"
-                type="number"
-                min="1"
-                required
-                value={quantity}
-                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-full px-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-slate-800 transition"
-              />
+              <label className="block text-xs font-medium text-slate-700 mb-1">Total según catálogo</label>
+              <div className="px-3 py-2 text-sm font-semibold bg-slate-100 border border-slate-200 rounded-lg text-slate-700">
+                {items.length ? formatUSD(catalogTotal) : '—'}
+                {hasUnpriced && <span className="ml-1 text-[11px] font-normal text-amber-700">(hay productos sin precio)</span>}
+              </div>
             </div>
-
             <div>
-              <label htmlFor="input-unit-price" className="block text-xs font-medium text-slate-700 mb-1">
-                Precio unitario (USD)
+              <label htmlFor="input-amount-paid" className="block text-xs font-medium text-slate-700 mb-1">
+                Monto pagado (USD) *
               </label>
               <input
-                id="input-unit-price"
+                id="input-amount-paid"
                 type="number"
-                min="0.1"
+                min="0"
                 step="0.01"
                 required
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(Math.max(0, parseFloat(e.target.value) || 0))}
-                className="w-full px-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-slate-800 transition"
+                value={amountPaid}
+                onChange={(e) => {
+                  setAmountPaid(e.target.value);
+                  setAmountTouched(true);
+                }}
+                className={`${INPUT_CLS} font-bold`}
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Total
-              </label>
-              <div className="px-3 py-2 text-sm font-semibold bg-emerald-50/50 border border-emerald-200/80 rounded-lg text-emerald-900 flex items-center justify-between">
-                <span>Total:</span>
-                <span>{formatUSD(totalAmount)}</span>
-              </div>
+              {paymentType === 'Abono inicial' && catalogTotal > 0 && totalAmount > 0 && (
+                <p className="text-[11px] text-slate-500 mt-1">Saldo pendiente: {formatUSD(Math.max(0, catalogTotal - totalAmount))}</p>
+              )}
             </div>
           </div>
 
@@ -680,7 +636,7 @@ export const SmartRegistrationForm: React.FC<SmartRegistrationFormProps> = ({
           <button
             id="btn-register-sale"
             type="submit"
-            disabled={isSyncing || !customerName || !customerEmail || !productName || !cedula || !asesora || !estado || !ciudadFinal || !direccion}
+            disabled={isSyncing || !customerName || !customerEmail || !items.length || totalAmount <= 0 || !cedula || !asesora || !estado || !ciudadFinal || !direccion}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-xl shadow-xs hover:shadow transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {isSyncing ? (

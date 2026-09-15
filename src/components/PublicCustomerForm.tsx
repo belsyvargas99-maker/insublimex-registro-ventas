@@ -16,7 +16,6 @@ import {
   ArrowLeft,
   Clock,
   MessageCircle,
-  Search,
   IdCard,
   UserRound,
   CalendarDays,
@@ -26,7 +25,8 @@ import {
   X,
 } from 'lucide-react';
 import { BRAND, PAYMENT_METHODS, PAYMENT_TYPES, PaymentMethodId, PaymentTypeId, formatUSD, whatsappLink, normalizeCedula } from '../config/brand';
-import { CATALOG_CATEGORIES, CATALOG_PRODUCTS, CatalogProduct } from '../data/catalogo';
+import { OrderItemsPicker, orderTotal, orderHasUnpriced, orderSummary } from './OrderItemsPicker';
+import { OrderItem } from '../types';
 import { VENEZUELA_STATES, OTHER_CITY, findState } from '../data/venezuela';
 
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -51,7 +51,6 @@ interface PublicCustomerFormProps {
   isAdminViewing?: boolean;
 }
 
-const OTHER_PRODUCT = '__otro__';
 
 const PAYMENT_ICON: Record<PaymentMethodId, React.ElementType> = {
   Transferencia: Landmark,
@@ -80,10 +79,7 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [productFilter, setProductFilter] = useState('');
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [customProductName, setCustomProductName] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [items, setItems] = useState<OrderItem[]>([]);
   const [amountPaid, setAmountPaid] = useState<string>('');
   const [amountTouched, setAmountTouched] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodId>('Transferencia');
@@ -131,56 +127,25 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
     setReceiptPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : '');
   };
 
-  const selectedProduct: CatalogProduct | null = useMemo(
-    () => CATALOG_PRODUCTS.find((p) => p.id === selectedProductId) ?? null,
-    [selectedProductId]
-  );
-  const isOther = selectedProductId === OTHER_PRODUCT;
-  const productName = isOther ? customProductName.trim() : selectedProduct?.name ?? '';
-
-  const catalogTotal = selectedProduct?.price != null ? selectedProduct.price * quantity : null;
+  const productName = orderSummary(items);
+  const quantity = items.reduce((acc, it) => acc + it.quantity, 0);
+  const catalogTotal: number | null = items.length && !orderHasUnpriced(items) ? orderTotal(items) : null;
   const amountNumber = parseFloat(amountPaid) || 0;
   const balance = catalogTotal != null && paymentType === 'Abono inicial' ? Math.max(0, catalogTotal - amountNumber) : 0;
 
-  const filteredProducts = useMemo(() => {
-    const q = productFilter
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .trim();
-    if (!q) return CATALOG_PRODUCTS;
-    return CATALOG_PRODUCTS.filter((p) =>
-      p.name
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .includes(q)
-    );
-  }, [productFilter]);
-
-  const syncAmountFromCatalog = (product: CatalogProduct | null, qty: number, type: PaymentTypeId) => {
-    if (product?.price != null && type === 'Pago completo') {
-      setAmountPaid((product.price * qty).toFixed(2));
-      setAmountTouched(false);
-    }
-  };
-
-  const handleSelectProduct = (id: string) => {
-    setSelectedProductId(id);
-    const product = CATALOG_PRODUCTS.find((p) => p.id === id) ?? null;
-    if (!amountTouched || product) syncAmountFromCatalog(product, quantity, paymentType);
-  };
-
-  const handleQuantityChange = (newQty: number) => {
-    const qty = Math.max(1, newQty);
-    setQuantity(qty);
-    syncAmountFromCatalog(selectedProduct, qty, paymentType);
+  // El monto pagado sigue al total del catálogo mientras el cliente no lo haya tocado
+  // y el pago sea completo. Con abono inicial, lo escribe él.
+  const handleItemsChange = (next: OrderItem[]) => {
+    setItems(next);
+    const t = next.length && !orderHasUnpriced(next) ? orderTotal(next) : null;
+    if (paymentType === 'Pago completo' && !amountTouched) setAmountPaid(t != null && t > 0 ? t.toFixed(2) : '');
   };
 
   const handlePaymentTypeChange = (type: PaymentTypeId) => {
     setPaymentType(type);
     if (type === 'Pago completo') {
-      syncAmountFromCatalog(selectedProduct, quantity, type);
+      if (catalogTotal != null && catalogTotal > 0) setAmountPaid(catalogTotal.toFixed(2));
+      setAmountTouched(false);
     } else {
       setAmountPaid('');
       setAmountTouched(true);
@@ -208,8 +173,8 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
       setErrorMessage('Indica el estado, la ciudad y la dirección de entrega.');
       return;
     }
-    if (!productName) {
-      setErrorMessage('Selecciona el producto que compraste (o escríbelo si no aparece en la lista).');
+    if (!items.length) {
+      setErrorMessage('Agrega al menos un producto a tu pedido.');
       return;
     }
     if (amountNumber <= 0) {
@@ -249,14 +214,13 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
       ciudad: ciudadFinal,
       direccion: direccion.trim(),
       receiptImage,
-      productName,
-      quantity: Number(quantity) || 1,
+      items: items.map((it) => ({ name: it.name, quantity: it.quantity, unitPrice: it.unitPrice })),
       totalAmount: Number(amountNumber.toFixed(2)),
       paymentMethod,
       paymentType,
       paymentReference: paymentReference.trim(),
       notes: [
-        selectedProduct?.price != null ? `Precio catálogo: ${formatUSD(selectedProduct.price)} c/u` : 'Producto fuera de catálogo',
+        catalogTotal != null ? `Total catálogo: ${formatUSD(catalogTotal)}` : 'Pedido con producto(s) a cotizar',
         paymentType === 'Abono inicial' && catalogTotal != null ? `Saldo pendiente: ${formatUSD(balance)}` : '',
         notes.trim(),
       ]
@@ -301,10 +265,7 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
     setDireccion('');
     setReceiptFile(null);
     setReceiptPreview('');
-    setProductFilter('');
-    setSelectedProductId('');
-    setCustomProductName('');
-    setQuantity(1);
+    setItems([]);
     setAmountPaid('');
     setAmountTouched(false);
     setPaymentType('Pago completo');
@@ -316,7 +277,7 @@ export const PublicCustomerForm: React.FC<PublicCustomerFormProps> = ({
 
   const whatsappReceiptText = `Hola INSUBLIMEX 👋 Ya registré mi pago en el portal.
 Comprobante: ${submissionId}
-Producto: ${productName}${quantity > 1 ? ` x${quantity}` : ''}
+Pedido: ${productName}
 Monto: ${formatUSD(amountNumber)} (${paymentMethod}${paymentType === 'Abono inicial' ? ', abono inicial' : ''})${paymentReference ? `\nReferencia: ${paymentReference}` : ''}
 Fecha de compra: ${formatPurchaseDate(purchaseDate)}
 Nombre: ${customerName} · CI ${normalizeCedula(cedula) ?? cedula}
@@ -434,10 +395,14 @@ Entrega: ${ciudadFinal}, ${estado}`;
                     <span className="text-slate-500 text-[11px] block">{customerPhone}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[11px]">Producto</span>
-                    <span className="font-bold text-slate-800 text-sm block">{productName}</span>
+                    <span className="text-slate-400 block text-[11px]">Pedido</span>
+                    {items.map((it) => (
+                      <span key={it.id} className="font-bold text-slate-800 text-sm block">
+                        {it.name} ×{it.quantity}
+                      </span>
+                    ))}
                     <span className="text-slate-500 text-[11px] block">
-                      Cantidad: {quantity} · {paymentMethod}
+                      {quantity} unidad{quantity === 1 ? '' : 'es'} · {paymentMethod}
                       {paymentType === 'Abono inicial' ? ' · Abono inicial' : ''}
                     </span>
                   </div>
@@ -734,81 +699,10 @@ Entrega: ${ciudadFinal}, ${estado}`;
                   <span>2. ¿Qué compraste?</span>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Buscar en el catálogo</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                    <input
-                      type="text"
-                      value={productFilter}
-                      onChange={(e) => setProductFilter(e.target.value)}
-                      placeholder="Ej: combo, plotter, prensa 38x38, tinta…"
-                      className={`${inputCls} pl-10`}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Producto *</label>
-                  <select
-                    required
-                    value={selectedProductId}
-                    onChange={(e) => handleSelectProduct(e.target.value)}
-                    className={inputCls}
-                  >
-                    <option value="">Selecciona tu producto…</option>
-                    {CATALOG_CATEGORIES.map((cat) => {
-                      const items = filteredProducts.filter((p) => p.category === cat.id);
-                      if (!items.length) return null;
-                      return (
-                        <optgroup key={cat.id} label={cat.label}>
-                          {items.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                              {p.price != null ? ` — ${formatUSD(p.price)}` : ' — consultar precio'}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                    <optgroup label="No está en la lista">
-                      <option value={OTHER_PRODUCT}>Otro producto (escribir)</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                {isOther && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Escribe el producto *</label>
-                    <input
-                      type="text"
-                      required
-                      value={customProductName}
-                      onChange={(e) => setCustomProductName(e.target.value)}
-                      placeholder="Tal como te lo indicó el asesor"
-                      className={inputCls}
-                    />
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Cantidad</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={quantity}
-                      onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 1)}
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Precio de catálogo</label>
-                    <div className="px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-semibold">
-                      {catalogTotal != null ? formatUSD(catalogTotal) : selectedProductId ? 'Según cotización del asesor' : '—'}
-                    </div>
-                  </div>
-                </div>
+                <p className="text-xs text-slate-500 -mt-1">
+                  Agrega cada producto de tu pedido. Puedes agregar todos los que compraste y ajustar cantidades.
+                </p>
+                <OrderItemsPicker items={items} onChange={handleItemsChange} inputCls={inputCls} />
               </div>
 
               {/* 3. Pago */}

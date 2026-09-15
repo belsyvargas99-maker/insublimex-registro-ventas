@@ -1,3 +1,12 @@
+/** Una línea del pedido. unitPrice null = producto a cotizar (fuera de catálogo o sin precio). */
+export interface OrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number | null;
+  category?: string;
+}
+
 export interface CustomerSaleRecord {
   id: string;
   timestamp: string; // ISO format or localized
@@ -15,11 +24,16 @@ export interface CustomerSaleRecord {
   direccion?: string;
   /** Enlace a la imagen del comprobante (Google Drive) o ruta local /uploads/... */
   receiptImageUrl?: string;
+  /** Resumen del pedido: "Combo Iniciador ×1 | Papel Qualitex ×2". */
   productName: string;
   category: string;
+  /** Total de unidades del pedido. */
   quantity: number;
+  /** Total del pedido según catálogo (suma de precio × cantidad). */
   unitPrice: number;
+  /** Monto realmente pagado. */
   totalAmount: number;
+  items?: OrderItem[];
   paymentMethod: 'Transferencia' | 'Zelle' | 'Efectivo';
   /** Pago completo o seña inicial (equipos de importación directa). */
   paymentType?: 'Pago completo' | 'Abono inicial';

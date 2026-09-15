@@ -152,8 +152,8 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
             <tr>
               <th scope="col" className="px-4 py-3">Cliente / Contacto</th>
               <th scope="col" className="px-4 py-3">Producto & Categoría</th>
-              <th scope="col" className="px-4 py-3 text-right">Cant. x Precio</th>
-              <th scope="col" className="px-4 py-3 text-right">Monto Total</th>
+              <th scope="col" className="px-4 py-3 text-right">Catálogo</th>
+              <th scope="col" className="px-4 py-3 text-right">Pagado</th>
               <th scope="col" className="px-4 py-3">Pago / Estado</th>
               <th scope="col" className="px-4 py-3">Validación</th>
               <th scope="col" className="px-4 py-3 text-center">Acción</th>
@@ -190,7 +190,17 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
 
                   {/* Product */}
                   <td className="px-4 py-3.5">
-                    <div className="font-medium text-slate-900">{rec.productName}</div>
+                    {rec.items && rec.items.length ? (
+                      <ul className="space-y-0.5">
+                        {rec.items.map((it, i) => (
+                          <li key={i} className="font-medium text-slate-900 text-xs">
+                            {it.name} <span className="text-slate-500">×{it.quantity}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="font-medium text-slate-900">{rec.productName}</div>
+                    )}
                     <span className="inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">
                       {rec.category}
                     </span>
@@ -205,8 +215,8 @@ export const RecordsTable: React.FC<RecordsTableProps> = ({
 
                   {/* Quantity & Unit Price */}
                   <td className="px-4 py-3.5 text-right font-mono">
-                    <span className="text-slate-800">{rec.quantity}</span> x{' '}
-                    <span className="text-slate-500">${rec.unitPrice.toFixed(2)}</span>
+                    <span className="text-slate-500" title="Total del pedido según catálogo">${rec.unitPrice.toFixed(2)}</span>
+                    <div className="text-[10px] text-slate-400">{rec.quantity} ud.</div>
                   </td>
 
                   {/* Total */}
